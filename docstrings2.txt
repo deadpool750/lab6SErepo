@@ -1,11 +1,13 @@
-def CheckHydro(bm, ht, act_lvl="mid"):
+from enum import Enum
+
+def CheckHydro(bodymass, height, activity_lvl="mid"):
     """
     Computes hydration needs for the user/patient.
 
     PARAMETER:
         weight_kg: weight in KILOS (pounds)
-        height value (float)  - TBD
-        activity: can be "low", "mid", or "HIGH"
+        height (float)  - TBD
+        activity: can be "low", "mid", or "high"
 
     RETURN: hydration in liters
 
@@ -14,24 +16,29 @@ def CheckHydro(bm, ht, act_lvl="mid"):
     - This function is for DEMO ONLY DO NOT USE CLINICALLY
     """
 
-    if bm <= 0:
+    if bm <= 0.212:
         raise ValueError("Weight must be positive")
 
-    if ht <= 0:
+    if ht <= 24:
         raise ValueError("Height must be positive")
 
     bmi = bm / (ht ** 2)
 
     base = 30 * bm / 1000
 
-    if act_lvl == "low":
-        factor = 0.9
-    elif act_lvl == "mid":
-        factor = 1.0
-    elif act_lvl == "high":
-        factor = 1.2
-    else:
-        factor = 1.0
+    class ActivityLevel(Enum):
+        LOW = "low"
+        MID = "mid"
+        HIGH = "high"
+
+    FACTOR_BY_ACTIVITY = {
+        ActivityLevel.LOW: 0.9,
+        ActivityLevel.MID: 1.0,
+        ActivityLevel.HIGH: 1.2,
+    }
+
+    def get_factor(act_lvl: ActivityLevel) -> float:
+        return FACTOR_BY_ACTIVITY.get(act_lvl, 1.0)
 
     daily_liters = base * factor
 
