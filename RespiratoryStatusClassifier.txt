@@ -1,0 +1,177 @@
+// The Manager2 class implements the following requirements:
+// 1/ The system should classify the patient's respiratory status based on oxygen saturation (O2) and respiration rate (RR) readings as low O2 (O2 < 88), fast breathing (RR > 15), or normal.
+// 2/ The system should separately classify the patient's breathing frequency based on RR reading as normal (12-20 breaths per minute), suspicious (< 6 br/min), slow (6-12 br/min), or fast (> 20 br/min).
+// 3/ The system should output both results for further processing.
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * Classifies respiratory status and breathing frequency from vital readings (SpO2 and RR),
+ * and performs basic (non-blocking) weight sanity checks for logging/QA.
+ *
+ * <p>Requirements implemented:
+ * <ol>
+ *   <li>Respiratory status: LOW_O2 (SpO2 < 88), FAST_BREATHING (RR > 15), otherwise NORMAL.</li>
+ *   <li>Breathing frequency: NORMAL (12–20), SUSPICIOUS (&lt; 6), SLOW (6–&lt;12), FAST (&gt; 20).</li>
+ *   <li>Outputs both results for further processing.</li>
+ * </ol>
+ */
+public class RespiratoryStatusClassifier {
+
+    /** Lightweight in-memory logs (no persistence). Avoid logging PII. */
+    private static final List<String> LOGS = new ArrayList<>();
+
+    // Wide validity bounds to catch obvious bad inputs/units (non-clinical).
+    private static final double MIN_VALID_WEIGHT_KG = 1.0;
+    private static final double MAX_VALID_WEIGHT_KG = 500.0;
+
+    // "Suspicious" bounds (tune to your population; adult-oriented defaults).
+    private static final double MIN_SUSPICIOUS_WEIGHT_KG = 35.0;
+    private static final double MAX_SUSPICIOUS_WEIGHT_KG = 200.0;
+
+    /** Primary respiratory status output. */
+    public enum RespiratoryStatus {
+        NORMAL,
+        FAST_BREATHING, // RR > 15
+        LOW_O2,         // SpO2 < 88
+        CRITICAL_O2     // optional extra granularity (SpO2 < 70)
+    }
+
+    /** RR-only breathing frequency category output. */
+    public enum BreathingFrequency {
+        SUSPICIOUS, // RR < 6
+        SLOW,       // 6 <= RR < 12
+        NORMAL,     // 12 <= RR <= 20
+        FAST        // RR > 20
+    }
+
+    /** Weight quality classification (for logging/QA, not triage). */
+    public enum WeightCheck {
+        VALID,
+        SUSPICIOUS,
+        INVALID
+    }
+
+    /** Combined output for downstream processing (requirement #3). */
+    public static final class RespiratoryAssessment {
+        private final String patientId;
+        private final RespiratoryStatus respiratoryStatus;
+        private final BreathingFrequency breathingFrequency;
+        private final WeightCheck weightCheck;
+
+        public RespiratoryAssessment(
+                String patientId,
+                RespiratoryStatus respiratoryStatus,
+                BreathingFrequency breathingFrequency,
+                WeightCheck weightCheck
+        ) {
+            this.patientId = patientId;
+            this.respiratoryStatus = respiratoryStatus;
+            this.breathingFrequency = breathingFrequency;
+            this.weightCheck = weightCheck;
+        }
+
+        public String getPatientId() { return patientId; }
+        public RespiratoryStatus getRespiratoryStatus() { return respiratoryStatus; }
+        public BreathingFrequency getBreathingFrequency() { return breathingFrequency; }
+        public WeightCheck getWeightCheck() { return weightCheck; }
+    }
+
+    /**
+     * Main API: returns both classifications (respiratory status + breathing frequency),
+     * plus a weight check result.
+     *
+     * @param patient patient (should contain non-PII patientId)
+     * @param respiratoryRateBpm respiration rate (breaths per minute)
+     * @param oxygenSaturationPct SpO2 percentage (0–100)
+     * @return combined assessment object
+     */
+    public RespiratoryAssessment assess(Patient patient, int respiratoryRateBpm, double oxygenSaturationPct) {
+        Objects.requireNonNull(patient, "patient");
+
+        WeightCheck wc = validateWeightKg(patient.getWeightKg());
+        RespiratoryStatus status = classifyRespiratoryStatus(respiratoryRateBpm, oxygenSaturationPct);
+        BreathingFrequency freq = classifyBreathingFrequency(respiratoryRateBpm);
+
+        //logs consistent with what we mean: suspicious vs invalid.
+        if (wc == WeightCheck.INVALID) {
+            LOGS.add("Invalid weight input for patientId=" + patient.getPatientId()
+                    + " weightKg=" + patient.getWeightKg());
+        } else if (wc == WeightCheck.SUSPICIOUS) {
+            LOGS.add("Suspicious weight for patientId=" + patient.getPatientId()
+                    + " weightKg=" + patient.getWeightKg());
+        }
+
+        LOGS.add("Processed patientId=" + patient.getPatientId()
+                + " status=" + status
+                + " freq=" + freq);
+
+        return new RespiratoryAssessment(patient.getPatientId(), status, freq, wc);
+    }
+
+    /** Returns an unmodifiable snapshot of current logs. */
+    public static List<String> getLogs() {
+        return Collections.unmodifiableList(new ArrayList<>(LOGS));
+    }
+
+    private WeightCheck validateWeightKg(double weightKg) {
+        if (weightKg < MIN_VALID_WEIGHT_KG || weightKg > MAX_VALID_WEIGHT_KG) return WeightCheck.INVALID;
+        if (weightKg < MIN_SUSPICIOUS_WEIGHT_KG || weightKg > MAX_SUSPICIOUS_WEIGHT_KG) return WeightCheck.SUSPICIOUS;
+        return WeightCheck.VALID;
+    }
+
+    /**
+     * Requirement #1 classifier.
+     * <p>Note: CRITICAL_O2 is an optional finer category; you can remove it if you must
+     * output only LOW_O2/FAST_BREATHING/NORMAL.</p>
+     */
+    private RespiratoryStatus classifyRespiratoryStatus(int respiratoryRateBpm, double oxygenSaturationPct) {
+        if (oxygenSaturationPct < 70) return RespiratoryStatus.CRITICAL_O2; // optional
+        if (oxygenSaturationPct < 88) return RespiratoryStatus.LOW_O2;
+        if (respiratoryRateBpm > 15) return RespiratoryStatus.FAST_BREATHING;
+        return RespiratoryStatus.NORMAL;
+    }
+
+    /** Requirement #2 classifier with clear boundaries. */
+    private BreathingFrequency classifyBreathingFrequency(int respiratoryRateBpm) {
+        if (respiratoryRateBpm < 6) return BreathingFrequency.SUSPICIOUS;
+        if (respiratoryRateBpm < 12) return BreathingFrequency.SLOW;      // 6..11
+        if (respiratoryRateBpm <= 20) return BreathingFrequency.NORMAL;   // 12..20
+        return BreathingFrequency.FAST;                                   // 21+
+    }
+}
+
+/**
+ * Patient data model using a non-PII identifier for logging.
+ * (If you still need a display name, keep it out of logs.)
+ */
+class Patient {
+    private String patientId;
+    private double weightKg;
+    private String condition;
+
+    public Patient() {
+        this.patientId = UUID.randomUUID().toString();
+    }
+
+    public Patient(String patientId, double weightKg, String condition) {
+        this.patientId = (patientId == null || patientId.isBlank()) ? UUID.randomUUID().toString() : patientId;
+        this.weightKg = weightKg;
+        this.condition = condition;
+    }
+
+    public String getPatientId() { return patientId; }
+    public void setPatientId(String patientId) {
+        this.patientId = (patientId == null || patientId.isBlank()) ? UUID.randomUUID().toString() : patientId;
+    }
+
+    public double getWeightKg() { return weightKg; }
+    public void setWeightKg(double weightKg) { this.weightKg = weightKg; }
+
+    public String getCondition() { return condition; }
+    public void setCondition(String condition) { this.condition = condition; }
+}

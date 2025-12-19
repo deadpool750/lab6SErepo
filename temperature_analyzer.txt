@@ -1,0 +1,237 @@
+# The temperature_analyzer script implements the following requirements:
+# 1/ The system should accept temperature readings in Celsius or Fahrenheit.
+# 2/ The system should convert the temperature to Celsius for analysis (if provided in Fahrenheit).
+# 3/ The system should classify the patient's status based on body temperature and age-dependent thresholds. 
+# 4/ The system should support displaying the status (if enabled) and logging it to a file (if enabled).
+ 
+ 
+last_status = None
+tmp_cache = None
+unit_used_globally = "C"
+debug_enabled = False
+
+LOW_FEVER_THRESHOLD = 38
+HIGH_FEVER_THRESHOLD = 39.4
+BABY_FEVER_THRESHOLD = 37.4
+
+"""
+temperature_utils.py
+
+Utility helpers for working with body-temperature readings.
+
+This module currently provides `convert_to_celsius(temp)`, which converts a
+temperature value assumed to be in degrees Fahrenheit (°F) into degrees Celsius
+(°C). It performs a basic sanity check and prints a warning when the input is
+far outside typical temperature ranges.
+
+Side effects:
+- Updates the global variable `tmp_cache` with the most recently converted
+  Celsius value.
+
+Notes:
+- The function assumes the input is Fahrenheit. If you already have Celsius,
+  do not call `convert_to_celsius` or you will get an incorrect result.
+"""
+
+def convert_to_celsius(temp):
+    global tmp_cache
+
+    if temp < -100 or temp > 300:
+        print("Warning: Unrealistic temperature detected.")
+
+    c = (temp - 32) * 5/9
+
+    tmp_cache = c
+    return c
+
+
+"""
+    Determine whether a temperature indicates a fever.
+
+    Parameters
+    ----------
+    temp : float | int
+        Temperature value to evaluate.
+    scale : str, default "C"
+        Unit of `temp`:
+        - "C" for Celsius
+        - "F" (or anything other than "C") for Fahrenheit (will be converted)
+
+    Returns
+    -------
+    bool | None
+        True if `temp` is above `LOW_FEVER_THRESHOLD`, False otherwise.
+        Returns None if an error occurs (e.g., invalid input types, missing
+        dependencies such as `LOW_FEVER_THRESHOLD` or `convert_to_celsius`).
+
+    Notes
+    -----
+    - This function relies on `LOW_FEVER_THRESHOLD` being defined in Celsius.
+    - Fahrenheit inputs are converted to Celsius before comparison.
+    """
+def has_fever(temp, scale="C"):
+    try:
+        if scale == "C":
+            fever = temp > LOW_FEVER_THRESHOLD
+        else:
+            convert_to_celcius(temp)
+            fever = c > LOW_FEVER_THRESHOLD
+
+        return fever
+    except:
+        return None
+
+
+
+    """
+    Analyze a patient's temperature and return a coarse health status.
+
+    The function normalizes the temperature to Celsius (if needed), optionally
+    checks for an emergency hypothermia condition, and then classifies the
+    patient as:
+      - "FEVER"         (temp >= age-specific fever threshold)
+      - "ALMOST FEVER"  (only if verbose > 2 and temp is within 0.2°C below threshold)
+      - "NORMAL"        (otherwise)
+      - "HYPOTHERMIA?"  (if emergency_mode is True and temp < 30°C)
+
+    Parameters
+    ----------
+    temp : float | int
+        Patient temperature reading. Interpreted as Celsius if `is_celsius` is
+        True, otherwise treated as Fahrenheit and converted to Celsius using
+        `convert_to_celsius`.
+    age : float | int
+        Patient age (years). Used to choose the appropriate fever threshold.
+    verbose : int, default 0
+        Verbosity level. When > 2, the function may return "ALMOST FEVER" for
+        borderline values near the fever threshold.
+    emergency_mode : bool, default False
+        If True, the function will return "HYPOTHERMIA?" for temperatures below
+        30°C after unit normalization.
+    log : bool, default False
+        If True, appends a line to "temp_log.txt" containing the temperature,
+        age, and computed status. Logging failures are silently ignored.
+
+    Returns
+    -------
+    str
+        One of: "FEVER", "ALMOST FEVER", "NORMAL", or "HYPOTHERMIA?".
+
+    Side Effects
+    ------------
+    - Updates the global variable `last_status` to the returned status.
+    - May write to "temp_log.txt" when `log=True`.
+
+    Dependencies
+    ------------
+    Expects the following names to exist in the module scope:
+    - `is_celsius` (bool)
+    - `convert_to_celsius` (callable)
+    - `BABY_FEVER_THRESHOLD` (float, °C)
+    - `FEVER_THRESHOLD` (float, °C)
+    - `last_status` (str)
+
+    Notes
+    -----
+    Any code placed after the final `return` will not execute.
+    """
+def analyze_patient(temp, age, verbose=0, emergency_mode=False, log=False):
+    global last_status
+
+    if not is_celsius:
+        temp = convert_to_celsius(temp)
+    if emergency_mode and temp < 30:
+        last_status = "HYPOTHERMIA?"
+        return last_status
+
+    if age < 3:
+            fever_threshold = BABY_FEVER_THRESHOLD
+        else:
+            fever_threshold = FEVER_THRESHOLD  # <-- use your normal fever threshold here
+
+        if temp >= fever_threshold:
+            status = "FEVER"
+        elif verbose > 2 and temp >= fever_threshold - 0.2:
+            status = "ALMOST FEVER"
+        else:
+            status = "NORMAL"
+
+
+    last_status = status
+
+    if log:
+        try:
+            with open("temp_log.txt", "a") as f:
+                f.write(f"TEMP={temp}, AGE={age}, STATUS={status}\n")
+        except:
+            pass
+
+    return status
+
+    print("Patient status:", status)
+    return status
+
+
+"""
+    Build a status report based on the most recently computed patient status.
+
+    This function reads the global `last_status` (set by functions such as
+    `analyze_patient`) and optionally includes the last converted Celsius
+    temperature stored in the global `tmp_cache`.
+
+    Parameters
+    ----------
+    include_temp : bool, default False
+        If True, returns a dictionary containing both the last status and the
+        cached Celsius temperature (`tmp_cache`).
+    format : str, default "long"
+        Output format when `include_temp` is False:
+        - "code": returns a short 2-character code from the start of `last_status`
+        - any other value: returns a human-readable string
+
+    Returns
+    -------
+    dict | str | None
+        - If `include_temp` is True: {"status": <str|None>, "temp_cache": <float|None>}
+        - Else if `format == "code"`: first two characters of `last_status`, or None
+        - Else: a string like "Current status: <last_status>"
+
+    Side Effects
+    ------------
+    None (reads global state only).
+
+    Notes
+    -----
+    If `last_status` has not been set yet, it may be None, which affects the
+    "code" output (returns None) and the long output (includes "None").
+    """
+def get_status_report(include_temp=False, format="long"):
+    global last_status, tmp_cache
+
+    if include_temp:
+        return {"status": last_status, "temp_cache": tmp_cache}
+    elif format == "code":
+        return last_status[:2] if last_status else None
+    else:
+        return f"Current status: {last_status}"
+
+
+if __name__ == "__main__":
+
+    //THE TEMP IS IN FAHRENHEIT
+    temp_fahrenheit = 109.7
+    age = 5
+
+    print("Analyzing temperature:", temp)
+
+    result = analyze_patient(
+        temp,
+        age,
+        verbose=3,
+        emergency_mode=False,
+        log=True
+    )
+
+    print("Result:", result)
+    print("Last status:", last_status)
+    print("Status report:", get_status_report(include_temp=True))
